@@ -7,6 +7,7 @@ import (
 type TraceItem struct {
 	RequestId string `json:"request_id"`
 	Path      string `json:"path"`
+	Host      string `json:"host"`
 	Seq       int    `json:"seq"`
 	Client    string `json:"client"`
 	Server    string `json:"server"`

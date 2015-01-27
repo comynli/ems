@@ -2,38 +2,33 @@ package store
 
 import (
 	"encoding/json"
-	"github.com/lixm/ems/common"
 	"io"
 )
 
-func queryBuild(ti common.TraceItem) []byte {
-	terms := []map[string]map[string]string{}
-	term := make(map[string]map[string]string)
-	term["term"] = make(map[string]string)
-	term["term"]["request_id"] = ti.RequestId
-	terms = append(terms, term)
-	delete(term["term"], "request_id")
-	term["term"]["client"] = ti.Client
-	terms = append(terms, term)
-	delete(term["term"], "client")
-	term["term"]["server"] = ti.Server
-	terms = append(terms, term)
-	bool := make(map[string][]map[string]map[string]string)
-	bool["must"] = terms
-	query := make(map[string]map[string][]map[string]map[string]string)
-	query["bool"] = bool
-	Q := make(map[string]map[string]map[string][]map[string]map[string]string)
-	Q["query"] = query
-	buf, _ := json.Marshal(Q)
-	return buf
+type Trace struct {
+	Seq    int    `json:"seq"`
+	Client string `json:"client"`
+	Server string `json:"server"`
+	Start  int64  `json:"start"`
+	Status int    `json:"status"`
+	End    int64  `json:"end"`
+	RT     int64  `json:"rt"`
+}
+
+type Item struct {
+	Path   string           `json:"path"`
+	Status int              `json:"status"`
+	RT     int64            `json:"rt"`
+	Host   string           `json:"host"`
+	Trace  map[string]Trace `json:"trace"`
 }
 
 type Hit struct {
-	Index  string           `json:"_index"`
-	Type   string           `json:"_type"`
-	ID     string           `json:"_id"`
-	Score  float32          `json:"_score"`
-	Source common.TraceItem `json:"_source"`
+	Index  string  `json:"_index"`
+	Type   string  `json:"_type"`
+	ID     string  `json:"_id"`
+	Score  float32 `json:"_score"`
+	Source Item    `json:"_source"`
 }
 
 type Hits struct {

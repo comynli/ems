@@ -8,11 +8,12 @@ import (
 	"github.com/lixm/ems/common"
 	tomb "gopkg.in/tomb.v2"
 	"log"
-	"math/rand"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -27,6 +28,7 @@ const (
 type endPoint struct {
 	Conn   *httputil.ClientConn
 	Url    *url.URL
+	RawUrl string
 	Status int
 }
 
@@ -36,26 +38,100 @@ type StoreServer struct {
 	sendQueue  chan []byte
 	index_name string
 	index_type string
+	cur        int
 	tomb.Tomb
 }
 
-func (ss *StoreServer) create_meta() ([]byte, error) {
-	index_name := fmt.Sprintf("%s-%s", ss.index_name, time.Now().Format("2006.01.02"))
+func (ss *StoreServer) encode(ti common.TraceItem) ([]byte, error) {
+
+	retry := 0
+	var (
+		item       Item
+		index_name string
+	)
+	for {
+		retry += 1
+		if retry > len(ss.endPoints) {
+			return nil, errors.New("no more backend to re-try")
+		}
+		url := fmt.Sprintf("%s/%s-*/%s/_search?q=_id:%s", ss.endPoints[ss.cur].RawUrl, ss.index_name, ss.index_type, ti.RequestId)
+		//host := ss.endPoints[ss.cur].Url.Host
+		ss.cur += 1
+		if ss.cur >= len(ss.endPoints) {
+			ss.cur = 0
+		}
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return nil, err
+		}
+		//req.Host = host
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			log.Printf("search %s fail %s", ti.RequestId, err)
+			continue
+		}
+
+		result, err := ParseStream(resp.Body)
+		if err != nil {
+			log.Printf("parse search result fail %s", err)
+			continue
+		}
+		if result.Hits.Total == 0 {
+			item = Item{}
+			index_name = fmt.Sprintf("%s-%s", ss.index_name, time.Now().Format("2006.01.02"))
+		} else {
+			item = result.Hits.Hits[0].Source
+			index_name = result.Hits.Hits[0].Index
+		}
+		break
+	}
+	if ti.Host != "" {
+		item.Host = ti.Host
+		item.Path = ti.Path
+		item.RT = ti.RT
+		item.Status = ti.Status
+		item.Trace = make(map[string]Trace)
+	} else {
+		key := strings.Join([]string{ti.Client, ti.Server, strconv.Itoa(ti.Seq)}, "#")
+		if t, ok := item.Trace[key]; !ok {
+			t = Trace{}
+			t.Client = ti.Client
+			t.End = ti.End
+			t.RT = ti.RT
+			t.Seq = ti.Seq
+			t.Server = ti.Server
+			t.Start = ti.Start
+			t.Status = ti.Status
+			if item.Trace == nil {
+				item.Trace = make(map[string]Trace)
+			}
+			item.Trace[key] = t
+		} else {
+			if t.End == 0 {
+				t.End = ti.End
+				t.Status = ti.Status
+			}
+			if t.Start == 0 {
+				t.Start = ti.Start
+			}
+			t.RT = t.End - t.Start
+			item.Trace[key] = t
+		}
+	}
 	meta := make(map[string]map[string]string)
 	meta["index"] = make(map[string]string)
 	meta["index"]["_index"] = index_name
 	meta["index"]["_type"] = ss.index_type
-	return json.Marshal(meta)
-}
-
-func (ss *StoreServer) update_meta(r Result) ([]byte, error) {
-	index_name := fmt.Sprintf("%s-%s", ss.index_name, time.Now().Format("2006.01.02"))
-	meta := make(map[string]map[string]string)
-	meta["update"] = make(map[string]string)
-	meta["update"]["_index"] = index_name
-	meta["update"]["_type"] = ss.index_type
-	meta["update"]["_id"] = r.Hits.Hits[0].ID
-	return json.Marshal(meta)
+	meta["index"]["_id"] = ti.RequestId
+	m, err := json.Marshal(meta)
+	if err != nil {
+		return nil, err
+	}
+	d, err := json.Marshal(item)
+	if err != nil {
+		return nil, err
+	}
+	return toBytes(m, d), nil
 }
 
 func toBytes(meta, ti []byte) []byte {
@@ -93,48 +169,12 @@ func (ss *StoreServer) store() error {
 	for {
 		select {
 		case ti := <-ss.queue:
-			buf, e := ti.Encode()
+			buf, e := ss.encode(ti)
 			if e != nil {
 				log.Printf("encode trace item fail %s", e)
+				continue
 			}
-			if (ti.End != 0 && ti.Start != 0) || ti.RT != 0 {
-				meta, _ := ss.create_meta()
-				ss.sendQueue <- toBytes(meta, buf)
-			} else {
-				query := queryBuild(ti)
-				url := fmt.Sprintf("/%s-*/%s/_search?q=request_id:%s", ss.index_name, ss.index_type, ti.RequestId)
-				req, e := http.NewRequest("GET", url, bytes.NewReader(query))
-				if e != nil {
-					log.Printf("make request fail %s", err)
-					continue
-				}
-				resp, e := ss.endPoints[rand.Intn(len(ss.endPoints))].Conn.Do(req)
-				if e != nil {
-					meta, _ := ss.create_meta()
-					ss.sendQueue <- toBytes(meta, buf)
-					log.Printf("%v", e)
-					continue
-				}
-				if resp.StatusCode == 200 {
-					result, e := ParseStream(resp.Body)
-					if e != nil {
-						meta, _ := ss.create_meta()
-						ss.sendQueue <- toBytes(meta, buf)
-						log.Printf("%v", e)
-						continue
-					}
-					if len(result.Hits.Hits) <= 0 {
-						meta, _ := ss.create_meta()
-						ss.sendQueue <- toBytes(meta, buf)
-						continue
-					}
-					meta, _ := ss.update_meta(result)
-					ss.sendQueue <- toBytes(meta, buf)
-				} else {
-					meta, _ := ss.create_meta()
-					ss.sendQueue <- toBytes(meta, buf)
-				}
-			}
+			ss.sendQueue <- buf
 		case e := <-err:
 			log.Printf("send to backend fail: %s", e)
 		case <-ss.Dying():
@@ -200,9 +240,9 @@ func New(urls []string, queue chan common.TraceItem, index_name, index_type stri
 		c, err := net.Dial("tcp", nurl.Host)
 		if err != nil {
 			log.Printf("connect to %s fail %s", u, err)
-			endPoints = append(endPoints, endPoint{Conn: nil, Url: nurl, Status: CLOSED})
+			endPoints = append(endPoints, endPoint{Conn: nil, Url: nurl, RawUrl: u, Status: CLOSED})
 		} else {
-			endPoints = append(endPoints, endPoint{Conn: httputil.NewClientConn(c, nil), Url: nurl, Status: IDLE})
+			endPoints = append(endPoints, endPoint{Conn: httputil.NewClientConn(c, nil), Url: nurl, RawUrl: u, Status: IDLE})
 		}
 	}
 	if len(endPoints) <= 0 {
