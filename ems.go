@@ -2,7 +2,7 @@ package main
 
 import (
 	"github.com/lixm/ems/config"
-	"github.com/lixm/ems/proxy"
+	"github.com/lixm/ems/frontend"
 	"github.com/lixm/ems/store"
 	"log"
 	"os"
@@ -28,20 +28,20 @@ func main() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGQUIT, syscall.SIGTERM)
 
-	p, err := proxy.New(conf.Proxy.Listen)
+	f, err := frontend.New(conf.Frontend.Listen)
 	if err != nil {
 		log.Fatalln(err)
 	}
-	s, err := store.New(conf.Store.Elasticsearchs, p.Queue(), conf.Store.Index, conf.Store.Type)
+	s, err := store.New(conf.Store.Elasticsearchs, f.Queue(), conf.Store.Index, conf.Store.Type)
 	if err != nil {
-		p.Stop()
+		f.Stop()
 		log.Fatal(err)
 	}
 	sig := <-c
 	log.Printf("%s received, exiting", sig.String())
 	s.Stop()
 	log.Println("store stopped")
-	p.Stop()
+	f.Stop()
 	log.Println("proxy stopped")
 	log.Println("exited")
 }

@@ -97,7 +97,7 @@ func (ss *StoreServer) store() error {
 			if e != nil {
 				log.Printf("encode trace item fail %s", e)
 			}
-			if ti.End != 0 && ti.Start != 0 {
+			if (ti.End != 0 && ti.Start != 0) || ti.RT != 0 {
 				meta, _ := ss.create_meta()
 				ss.sendQueue <- toBytes(meta, buf)
 			} else {

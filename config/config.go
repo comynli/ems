@@ -6,11 +6,11 @@ import (
 )
 
 type Conf struct {
-	Proxy ProxyConfig `proxy`
-	Store StoreConfig `store`
+	Frontend FrontendConfig `frontend`
+	Store    StoreConfig    `store`
 }
 
-type ProxyConfig struct {
+type FrontendConfig struct {
 	Listen string `listen`
 }
 
