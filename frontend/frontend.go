@@ -62,9 +62,14 @@ func (fs *FrontendServer) listen() error {
 					log.Printf("Decode message<%s> fail: %s", string(buf), err)
 					continue
 				}
-				fs.queue <- ti
+				select {
+				case fs.queue <- ti:
+				default:
+					log.Println("overflow queue")
+				}
+
 			}
-			conn.WriteTo([]byte("ok"), conn.RemoteAddr())
+			//conn.WriteTo([]byte("ok"), conn.RemoteAddr())
 		}
 	}
 }
@@ -78,8 +83,8 @@ func (fs *FrontendServer) Stop() error {
 	return fs.Wait()
 }
 
-func New(addr string) (*FrontendServer, error) {
-	queue := make(chan common.TraceItem, 1024)
+func New(addr string, queue_size int64) (*FrontendServer, error) {
+	queue := make(chan common.TraceItem, queue_size)
 	fs := &FrontendServer{addr: addr, queue: queue}
 	fs.Go(fs.listen)
 	return fs, nil

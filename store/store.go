@@ -33,105 +33,12 @@ type endPoint struct {
 }
 
 type StoreServer struct {
-	endPoints  []endPoint
-	queue      chan common.TraceItem
-	sendQueue  chan []byte
-	index_name string
-	index_type string
-	cur        int
+	endPoints    []endPoint
+	redisCluster *Cluster
+	queue        chan common.TraceItem
+	sendQueue    chan []byte
+	index_name   string
 	tomb.Tomb
-}
-
-func (ss *StoreServer) encode(ti common.TraceItem) ([]byte, error) {
-
-	retry := 0
-	var (
-		item       Item
-		index_name string
-	)
-	for {
-		retry += 1
-		if retry > len(ss.endPoints) {
-			return nil, errors.New("no more backend to re-try")
-		}
-		url := fmt.Sprintf("%s/%s-*/%s/_search?q=_id:%s", ss.endPoints[ss.cur].RawUrl, ss.index_name, ss.index_type, ti.RequestId)
-		//host := ss.endPoints[ss.cur].Url.Host
-		ss.cur += 1
-		if ss.cur >= len(ss.endPoints) {
-			ss.cur = 0
-		}
-		req, err := http.NewRequest("GET", url, nil)
-		if err != nil {
-			return nil, err
-		}
-		//req.Host = host
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			log.Printf("search %s fail %s", ti.RequestId, err)
-			continue
-		}
-
-		result, err := ParseStream(resp.Body)
-		if err != nil {
-			log.Printf("parse search result fail %s", err)
-			continue
-		}
-		if result.Hits.Total == 0 {
-			item = Item{}
-			index_name = fmt.Sprintf("%s-%s", ss.index_name, time.Now().Format("2006.01.02"))
-		} else {
-			item = result.Hits.Hits[0].Source
-			index_name = result.Hits.Hits[0].Index
-		}
-		break
-	}
-	if ti.Host != "" {
-		item.Host = ti.Host
-		item.Path = ti.Path
-		item.RT = ti.RT
-		item.Status = ti.Status
-		item.Trace = make(map[string]Trace)
-	} else {
-		key := strings.Join([]string{ti.Client, ti.Server, strconv.Itoa(ti.Seq)}, "#")
-		if t, ok := item.Trace[key]; !ok {
-			t = Trace{}
-			t.Client = ti.Client
-			t.End = ti.End
-			t.RT = ti.RT
-			t.Seq = ti.Seq
-			t.Server = ti.Server
-			t.Start = ti.Start
-			t.Status = ti.Status
-			if item.Trace == nil {
-				item.Trace = make(map[string]Trace)
-			}
-			item.Trace[key] = t
-		} else {
-			if t.End == 0 {
-				t.End = ti.End
-				t.Status = ti.Status
-			}
-			if t.Start == 0 {
-				t.Start = ti.Start
-			}
-			t.RT = t.End - t.Start
-			item.Trace[key] = t
-		}
-	}
-	meta := make(map[string]map[string]string)
-	meta["index"] = make(map[string]string)
-	meta["index"]["_index"] = index_name
-	meta["index"]["_type"] = ss.index_type
-	meta["index"]["_id"] = ti.RequestId
-	m, err := json.Marshal(meta)
-	if err != nil {
-		return nil, err
-	}
-	d, err := json.Marshal(item)
-	if err != nil {
-		return nil, err
-	}
-	return toBytes(m, d), nil
 }
 
 func toBytes(meta, ti []byte) []byte {
@@ -139,6 +46,65 @@ func toBytes(meta, ti []byte) []byte {
 	data = append(data, ti...)
 	data = append(data, '\n')
 	return data
+}
+
+func (ss *StoreServer) meta(index_type string, timestamp time.Time) ([]byte, error) {
+	index_name := fmt.Sprintf("%s-%s", ss.index_name, timestamp.Format("2006.01.02"))
+	meta := make(map[string]map[string]string)
+	meta["index"] = make(map[string]string)
+	meta["index"]["_index"] = index_name
+	meta["index"]["_type"] = index_type
+	return json.Marshal(meta)
+}
+
+func (ss *StoreServer) encode(ti common.TraceItem) ([]byte, error) {
+	if ti.Host != "" {
+		data := []byte{}
+		ts, err := ss.redisCluster.HGetAll(ti.RequestId)
+		if err != nil {
+			return nil, err
+		}
+		for k, t := range ts {
+			t.Host = ti.Host
+			t.Path = ti.Path
+			t.RT = t.End - t.Start
+			buf, err := t.Encode()
+			if err != nil {
+				log.Printf("%s %s encode fail %s", ti.RequestId, k, err)
+				continue
+			}
+			meta, _ := ss.meta("trace", ti.TimeStamp)
+			data = append(data, toBytes(meta, buf)...)
+		}
+		meta, _ := ss.meta("log", ti.TimeStamp)
+		buf, err := ti.Encode()
+		if err != nil {
+			return nil, err
+		}
+		data = append(data, toBytes(meta, buf)...)
+		ss.redisCluster.Del(ti.RequestId)
+		return data, nil
+	} else {
+		key := strings.Join([]string{ti.Client, ti.Server, strconv.Itoa(ti.Seq)}, "#")
+		t, err := ss.redisCluster.HGet(ti.RequestId, key)
+		if err != nil {
+			ss.redisCluster.HSet(ti.RequestId, key, ti)
+			return nil, nil
+		}
+		if t.RequestId == "" {
+			ss.redisCluster.HSet(ti.RequestId, key, ti)
+			return nil, nil
+		}
+		if ti.Start != 0 {
+			t.Start = ti.Start
+		}
+		if ti.End != 0 {
+			t.End = ti.End
+			t.Status = ti.Status
+		}
+		ss.redisCluster.HSet(ti.RequestId, key, ti)
+		return nil, nil
+	}
 }
 
 func (ss *StoreServer) sendLoop(err chan error) {
@@ -174,7 +140,9 @@ func (ss *StoreServer) store() error {
 				log.Printf("encode trace item fail %s", e)
 				continue
 			}
-			ss.sendQueue <- buf
+			if buf != nil {
+				ss.sendQueue <- buf
+			}
 		case e := <-err:
 			log.Printf("send to backend fail: %s", e)
 		case <-ss.Dying():
@@ -225,11 +193,12 @@ func (ss *StoreServer) Stop() error {
 	for _, endPoint := range ss.endPoints {
 		endPoint.Conn.Close()
 	}
+	ss.redisCluster.Close()
 	ss.Kill(nil)
 	return ss.Wait()
 }
 
-func New(urls []string, queue chan common.TraceItem, index_name, index_type string) (*StoreServer, error) {
+func New(urls, redisServers []string, redisPoolSize int, queue chan common.TraceItem, index_name string) (*StoreServer, error) {
 	endPoints := []endPoint{}
 	for _, u := range urls {
 		nurl, err := url.Parse(u)
@@ -248,12 +217,16 @@ func New(urls []string, queue chan common.TraceItem, index_name, index_type stri
 	if len(endPoints) <= 0 {
 		return nil, errors.New("no more endpoints to try")
 	}
+	c, err := NewCluster(redisServers, redisPoolSize)
+	if err != nil {
+		return nil, err
+	}
 	ss := &StoreServer{
-		endPoints:  endPoints,
-		queue:      queue,
-		sendQueue:  make(chan []byte),
-		index_name: index_name,
-		index_type: index_type,
+		endPoints:    endPoints,
+		queue:        queue,
+		sendQueue:    make(chan []byte),
+		index_name:   index_name,
+		redisCluster: c,
 	}
 	ss.Go(ss.store)
 	return ss, nil

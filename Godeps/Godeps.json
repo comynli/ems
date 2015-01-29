@@ -3,6 +3,20 @@
 	"GoVersion": "go1.4.1",
 	"Deps": [
 		{
+			"ImportPath": "github.com/fzzy/radix/extra/pool",
+			"Comment": "v0.5.2-1-g019b4f7",
+			"Rev": "019b4f7e600f22fb2a98b4634fbff4a8737d8047"
+		},
+		{
+			"ImportPath": "github.com/fzzy/radix/redis",
+			"Comment": "v0.5.2-1-g019b4f7",
+			"Rev": "019b4f7e600f22fb2a98b4634fbff4a8737d8047"
+		},
+		{
+			"ImportPath": "github.com/stathat/consistent",
+			"Rev": "926aaf71d18742447985e7e4f1398662bcae41b2"
+		},
+		{
 			"ImportPath": "gopkg.in/tomb.v2",
 			"Rev": "14b3d72120e8d10ea6e6b7f87f7175734b1faab8"
 		},
