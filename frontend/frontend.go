@@ -13,69 +13,115 @@ const (
 	BUSY     = 1
 	CLOSED   = 2
 	ERROR    = 3
-	BUF_SIZE = 1024
+	BUF_SIZE = 1500
 )
 
 type FrontendServer struct {
-	addr  string
-	queue chan common.TraceItem
+	logAddr  string
+	rpcAddr  string
+	LogQueue chan common.LogItem
+	RpcQueue chan common.RequestHeader
 	tomb.Tomb
 }
 
 func (fs *FrontendServer) listen() error {
-	addr, err := net.ResolveUDPAddr("udp", fs.addr)
+	logAddr, err := net.ResolveUDPAddr("udp", fs.logAddr)
 	if err != nil {
 		log.Printf("wrong listen address %s", err)
 		return err
 	}
-	conn, err := net.ListenUDP("udp", addr)
+	rpcAddr, err := net.ResolveUDPAddr("udp", fs.rpcAddr)
+	if err != nil {
+		log.Printf("wrong listen address %s", err)
+		return err
+	}
+	logConn, err := net.ListenUDP("udp", logAddr)
 	if err != nil {
 		log.Printf("lesten fail %s", err)
 		return err
 	}
-	defer conn.Close()
+	rpcConn, err := net.ListenUDP("udp", rpcAddr)
+	if err != nil {
+		log.Printf("lesten fail %s", err)
+		return err
+	}
+	//defer logConn.Close()
+	//defer rpcConn.Close()
 
-	isClose := false
+	logCtl := make(chan int, 1)
+	rpcCtl := make(chan int, 1)
+	logCtl <- 1
+	rpcCtl <- 1
+
 	for {
 		select {
 		case <-fs.Dying():
-			isClose = true
 			return nil
-		default:
-			buf := []byte{}
-			for !isClose {
+		case <-logCtl:
+			go func(conn *net.UDPConn) {
+				defer func() {
+					logCtl <- 1
+				}()
+				if conn == nil {
+					return
+				}
+				buf := []byte{}
 				b := make([]byte, BUF_SIZE)
 				conn.SetReadDeadline(time.Now().Add(time.Duration(3) * time.Second))
 				length, err := conn.Read(b)
 				buf = append(buf, b[0:length]...)
-				if length < BUF_SIZE {
-					break
-				}
 				if err != nil {
 					log.Printf("read from %s fail: %s", conn.RemoteAddr().Network(), err)
-					break
+					return
 				}
-			}
-			if len(buf) > 0 {
-				ti, err := common.Decode(buf)
+				if len(buf) > 0 {
+					li, err := common.LogDecode(buf)
+					if err != nil {
+						log.Printf("Decode message<%s> fail: %s", string(buf), err)
+						return
+					}
+					select {
+					case fs.LogQueue <- li:
+					default:
+						log.Println("log overflow queue")
+					}
+				}
+			}(logConn)
+		case <-rpcCtl:
+			go func(conn *net.UDPConn) {
+				defer func() {
+					rpcCtl <- 1
+				}()
+				if conn == nil {
+					return
+				}
+				buf := []byte{}
+				b := make([]byte, BUF_SIZE)
+				conn.SetReadDeadline(time.Now().Add(time.Duration(3) * time.Second))
+				length, err := conn.Read(b)
+				buf = append(buf, b[0:length]...)
 				if err != nil {
-					log.Printf("Decode message<%s> fail: %s", string(buf), err)
-					continue
+					log.Printf("read from %s fail: %s", conn.RemoteAddr().Network(), err)
+					return
 				}
-				select {
-				case fs.queue <- ti:
-				default:
-					log.Println("overflow queue")
+				if len(buf) > 0 {
+					ri, err := common.RpcDecode(buf)
+					if err != nil {
+						log.Printf("Decode message<%s> fail: %s", string(buf), err)
+						return
+					}
+					select {
+					case fs.RpcQueue <- ri:
+					default:
+						log.Println("rpc overflow queue")
+					}
 				}
-
-			}
-			//conn.WriteTo([]byte("ok"), conn.RemoteAddr())
+			}(rpcConn)
 		}
 	}
-}
-
-func (fs *FrontendServer) Queue() chan common.TraceItem {
-	return fs.queue
+	logConn.Close()
+	rpcConn.Close()
+	return nil
 }
 
 func (fs *FrontendServer) Stop() error {
@@ -83,9 +129,10 @@ func (fs *FrontendServer) Stop() error {
 	return fs.Wait()
 }
 
-func New(addr string, queue_size int64) (*FrontendServer, error) {
-	queue := make(chan common.TraceItem, queue_size)
-	fs := &FrontendServer{addr: addr, queue: queue}
+func New(logAddr, rpcAddr string, queue_size int64) (*FrontendServer, error) {
+	logQueue := make(chan common.LogItem, queue_size)
+	rpcQueue := make(chan common.RequestHeader, queue_size)
+	fs := &FrontendServer{logAddr: logAddr, rpcAddr: rpcAddr, LogQueue: logQueue, RpcQueue: rpcQueue}
 	fs.Go(fs.listen)
 	return fs, nil
 }

@@ -27,21 +27,21 @@ func NewCluster(servers []string, poolSize int) (*Cluster, error) {
 	return &Cluster{cons: cons, pools: pools}, nil
 }
 
-func (c *Cluster) decode(data []byte) (common.TraceItem, error) {
-	ti := common.TraceItem{}
+func (c *Cluster) decode(data []byte) (common.RequestHeader, error) {
+	ri := common.RequestHeader{}
 	dec := gob.NewDecoder(bytes.NewReader(data))
-	err := dec.Decode(&ti)
-	return ti, err
+	err := dec.Decode(&ri)
+	return ri, err
 }
 
-func (c *Cluster) encode(ti common.TraceItem) ([]byte, error) {
+func (c *Cluster) encode(ri common.RequestHeader) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
-	err := enc.Encode(ti)
+	err := enc.Encode(ri)
 	return buf.Bytes(), err
 }
 
-func (c *Cluster) HSet(key, filed string, val common.TraceItem) error {
+func (c *Cluster) HSet(key, filed string, val common.RequestHeader) error {
 	name, err := c.cons.Get(key)
 	if err != nil {
 		return err
@@ -60,26 +60,26 @@ func (c *Cluster) HSet(key, filed string, val common.TraceItem) error {
 	return err
 }
 
-func (c *Cluster) HGet(key, filed string) (common.TraceItem, error) {
+func (c *Cluster) HGet(key, filed string) (common.RequestHeader, error) {
 	name, err := c.cons.Get(key)
 	if err != nil {
-		return common.TraceItem{}, err
+		return common.RequestHeader{}, err
 	}
 	r, err := c.pools[name].Get()
 	if err != nil {
-		return common.TraceItem{}, err
+		return common.RequestHeader{}, err
 	}
 	defer c.pools[name].Put(r)
 	val := r.Cmd("HGET", key, filed)
 	data, err := val.Bytes()
 	if err != nil {
-		return common.TraceItem{}, err
+		return common.RequestHeader{}, err
 	}
 	return c.decode(data)
 }
 
-func (c *Cluster) HGetAll(key string) (map[string]common.TraceItem, error) {
-	ret := make(map[string]common.TraceItem)
+func (c *Cluster) HGetAll(key string) (map[string]common.RequestHeader, error) {
+	ret := make(map[string]common.RequestHeader)
 	name, err := c.cons.Get(key)
 
 	if err != nil {

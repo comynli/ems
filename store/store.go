@@ -35,7 +35,8 @@ type endPoint struct {
 type StoreServer struct {
 	endPoints    []endPoint
 	redisCluster *Cluster
-	queue        chan common.TraceItem
+	logQueue     chan common.LogItem
+	rpcQueue     chan common.RequestHeader
 	sendQueue    chan []byte
 	index_name   string
 	tomb.Tomb
@@ -57,54 +58,52 @@ func (ss *StoreServer) meta(index_type string, timestamp time.Time) ([]byte, err
 	return json.Marshal(meta)
 }
 
-func (ss *StoreServer) encode(ti common.TraceItem) ([]byte, error) {
-	if ti.Host != "" {
-		data := []byte{}
-		ts, err := ss.redisCluster.HGetAll(ti.RequestId)
-		if err != nil {
-			return nil, err
-		}
-		for k, t := range ts {
-			t.Host = ti.Host
-			t.Path = ti.Path
-			t.RT = t.End - t.Start
-			buf, err := t.Encode()
-			if err != nil {
-				log.Printf("%s %s encode fail %s", ti.RequestId, k, err)
-				continue
-			}
-			meta, _ := ss.meta("trace", ti.TimeStamp)
-			data = append(data, toBytes(meta, buf)...)
-		}
-		meta, _ := ss.meta("log", ti.TimeStamp)
-		buf, err := ti.Encode()
-		if err != nil {
-			return nil, err
-		}
-		data = append(data, toBytes(meta, buf)...)
-		ss.redisCluster.Del(ti.RequestId)
-		return data, nil
-	} else {
-		key := strings.Join([]string{ti.Client, ti.Server, strconv.Itoa(ti.Seq)}, "#")
-		t, err := ss.redisCluster.HGet(ti.RequestId, key)
-		if err != nil {
-			ss.redisCluster.HSet(ti.RequestId, key, ti)
-			return nil, nil
-		}
-		if t.RequestId == "" {
-			ss.redisCluster.HSet(ti.RequestId, key, ti)
-			return nil, nil
-		}
-		if ti.Start != 0 {
-			t.Start = ti.Start
-		}
-		if ti.End != 0 {
-			t.End = ti.End
-			t.Status = ti.Status
-		}
-		ss.redisCluster.HSet(ti.RequestId, key, ti)
-		return nil, nil
+func (ss *StoreServer) logEncode(li common.LogItem) ([]byte, error) {
+	data := []byte{}
+	rs, err := ss.redisCluster.HGetAll(li.RequestId)
+	if err != nil {
+		return nil, err
 	}
+	for k, r := range rs {
+		t := common.Convert(r, li.Host, li.Path)
+		buf, err := t.Encode()
+		if err != nil {
+			log.Printf("%s %s encode fail %s", t.RequestId, k, err)
+			continue
+		}
+		meta, _ := ss.meta("trace", t.TimeStamp)
+		data = append(data, toBytes(meta, buf)...)
+	}
+	meta, _ := ss.meta("log", li.TimeStamp)
+	buf, err := li.Encode()
+	if err != nil {
+		return nil, err
+	}
+	data = append(data, toBytes(meta, buf)...)
+	ss.redisCluster.Del(li.RequestId)
+	return data, nil
+}
+
+func (ss *StoreServer) rpcEncode(ri common.RequestHeader) {
+	key := strings.Join([]string{ri.Client, ri.Server, strconv.Itoa(int(ri.Seq))}, "#")
+	t, err := ss.redisCluster.HGet(ri.RequestId, key)
+	if err != nil {
+		ss.redisCluster.HSet(ri.RequestId, key, ri)
+		return
+	}
+	if t.RequestId == "" {
+		ss.redisCluster.HSet(ri.RequestId, key, ri)
+		return
+	}
+	if ri.Start != 0 {
+		t.Start = ri.Start
+	}
+	if ri.End != 0 {
+		t.End = ri.End
+		t.Status = ri.Status
+	}
+	ss.redisCluster.HSet(ri.RequestId, key, ri)
+	return
 }
 
 func (ss *StoreServer) sendLoop(err chan error) {
@@ -134,8 +133,8 @@ func (ss *StoreServer) store() error {
 	ss.sendLoop(err)
 	for {
 		select {
-		case ti := <-ss.queue:
-			buf, e := ss.encode(ti)
+		case li := <-ss.logQueue:
+			buf, e := ss.logEncode(li)
 			if e != nil {
 				log.Printf("encode trace item fail %s", e)
 				continue
@@ -143,6 +142,8 @@ func (ss *StoreServer) store() error {
 			if buf != nil {
 				ss.sendQueue <- buf
 			}
+		case ri := <-ss.rpcQueue:
+			ss.rpcEncode(ri)
 		case e := <-err:
 			log.Printf("send to backend fail: %s", e)
 		case <-ss.Dying():
@@ -198,7 +199,7 @@ func (ss *StoreServer) Stop() error {
 	return ss.Wait()
 }
 
-func New(urls, redisServers []string, redisPoolSize int, queue chan common.TraceItem, index_name string) (*StoreServer, error) {
+func New(urls, redisServers []string, redisPoolSize int, logQueue chan common.LogItem, rpcQueue chan common.RequestHeader, index_name string) (*StoreServer, error) {
 	endPoints := []endPoint{}
 	for _, u := range urls {
 		nurl, err := url.Parse(u)
@@ -223,7 +224,8 @@ func New(urls, redisServers []string, redisPoolSize int, queue chan common.Trace
 	}
 	ss := &StoreServer{
 		endPoints:    endPoints,
-		queue:        queue,
+		logQueue:     logQueue,
+		rpcQueue:     rpcQueue,
 		sendQueue:    make(chan []byte),
 		index_name:   index_name,
 		redisCluster: c,

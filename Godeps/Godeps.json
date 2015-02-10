@@ -3,6 +3,10 @@
 	"GoVersion": "go1.4.1",
 	"Deps": [
 		{
+			"ImportPath": "git.apache.org/thrift.git/lib/go/thrift",
+			"Rev": "281bdae6b2e40694db57f19b0ee13eb51b575c39"
+		},
+		{
 			"ImportPath": "github.com/fzzy/radix/extra/pool",
 			"Comment": "v0.5.2-1-g019b4f7",
 			"Rev": "019b4f7e600f22fb2a98b4634fbff4a8737d8047"

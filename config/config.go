@@ -11,8 +11,9 @@ type Conf struct {
 }
 
 type FrontendConfig struct {
-	Listen    string `listen`
-	QueueSize int64  `queue_size`
+	LogListen    string `listen.log`
+	ThriftListen string `listen.thrift`
+	QueueSize    int64  `queue_size`
 }
 
 type StoreConfig struct {
