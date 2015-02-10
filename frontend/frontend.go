@@ -25,7 +25,7 @@ type FrontendServer struct {
 	logAddr  string
 	rpcAddr  string
 	LogQueue chan common.LogItem
-	RpcQueue chan common.RequestHeader
+	RpcQueue chan common.RpcItem
 	tomb.Tomb
 }
 
@@ -136,7 +136,7 @@ func (fs *FrontendServer) Stop() error {
 
 func New(logAddr, rpcAddr string, queue_size int64) (*FrontendServer, error) {
 	logQueue := make(chan common.LogItem, queue_size)
-	rpcQueue := make(chan common.RequestHeader, queue_size)
+	rpcQueue := make(chan common.RpcItem, queue_size)
 	fs := &FrontendServer{logAddr: logAddr, rpcAddr: rpcAddr, LogQueue: logQueue, RpcQueue: rpcQueue}
 	fs.Go(fs.listen)
 	return fs, nil

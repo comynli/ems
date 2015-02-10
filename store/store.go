@@ -36,7 +36,7 @@ type StoreServer struct {
 	endPoints    []endPoint
 	redisCluster *Cluster
 	logQueue     chan common.LogItem
-	rpcQueue     chan common.RequestHeader
+	rpcQueue     chan common.RpcItem
 	sendQueue    chan []byte
 	index_name   string
 	tomb.Tomb
@@ -84,7 +84,7 @@ func (ss *StoreServer) logEncode(li common.LogItem) ([]byte, error) {
 	return data, nil
 }
 
-func (ss *StoreServer) rpcEncode(ri common.RequestHeader) {
+func (ss *StoreServer) rpcEncode(ri common.RpcItem) {
 	key := strings.Join([]string{ri.Client, ri.Server, strconv.Itoa(int(ri.Seq))}, "#")
 	t, err := ss.redisCluster.HGet(ri.RequestId, key)
 	if err != nil {
@@ -203,7 +203,7 @@ func (ss *StoreServer) Stop() error {
 	return ss.Wait()
 }
 
-func New(urls, redisServers []string, redisPoolSize int, logQueue chan common.LogItem, rpcQueue chan common.RequestHeader, index_name string) (*StoreServer, error) {
+func New(urls, redisServers []string, redisPoolSize int, logQueue chan common.LogItem, rpcQueue chan common.RpcItem, index_name string) (*StoreServer, error) {
 	endPoints := []endPoint{}
 	for _, u := range urls {
 		nurl, err := url.Parse(u)

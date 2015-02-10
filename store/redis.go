@@ -27,21 +27,21 @@ func NewCluster(servers []string, poolSize int) (*Cluster, error) {
 	return &Cluster{cons: cons, pools: pools}, nil
 }
 
-func (c *Cluster) decode(data []byte) (common.RequestHeader, error) {
-	ri := common.RequestHeader{}
+func (c *Cluster) decode(data []byte) (common.RpcItem, error) {
+	ri := common.RpcItem{}
 	dec := gob.NewDecoder(bytes.NewReader(data))
 	err := dec.Decode(&ri)
 	return ri, err
 }
 
-func (c *Cluster) encode(ri common.RequestHeader) ([]byte, error) {
+func (c *Cluster) encode(ri common.RpcItem) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
 	err := enc.Encode(ri)
 	return buf.Bytes(), err
 }
 
-func (c *Cluster) HSet(key, filed string, val common.RequestHeader) error {
+func (c *Cluster) HSet(key, filed string, val common.RpcItem) error {
 	name, err := c.cons.Get(key)
 	if err != nil {
 		return err
@@ -60,26 +60,26 @@ func (c *Cluster) HSet(key, filed string, val common.RequestHeader) error {
 	return err
 }
 
-func (c *Cluster) HGet(key, filed string) (common.RequestHeader, error) {
+func (c *Cluster) HGet(key, filed string) (common.RpcItem, error) {
 	name, err := c.cons.Get(key)
 	if err != nil {
-		return common.RequestHeader{}, err
+		return common.RpcItem{}, err
 	}
 	r, err := c.pools[name].Get()
 	if err != nil {
-		return common.RequestHeader{}, err
+		return common.RpcItem{}, err
 	}
 	defer c.pools[name].Put(r)
 	val := r.Cmd("HGET", key, filed)
 	data, err := val.Bytes()
 	if err != nil {
-		return common.RequestHeader{}, err
+		return common.RpcItem{}, err
 	}
 	return c.decode(data)
 }
 
-func (c *Cluster) HGetAll(key string) (map[string]common.RequestHeader, error) {
-	ret := make(map[string]common.RequestHeader)
+func (c *Cluster) HGetAll(key string) (map[string]common.RpcItem, error) {
+	ret := make(map[string]common.RpcItem)
 	name, err := c.cons.Get(key)
 
 	if err != nil {

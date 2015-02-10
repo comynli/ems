@@ -2,7 +2,6 @@ package common
 
 import (
 	"encoding/json"
-	"git.apache.org/thrift.git/lib/go/thrift"
 	"time"
 )
 
@@ -14,6 +13,17 @@ type LogItem struct {
 	Status    int       `json:"status"`
 	RT        int64     `json:"rt"`
 	TimeStamp time.Time `json:"timestamp"`
+}
+
+type RpcItem struct {
+	RequestId string `json:"request_id"`
+	Seq       int32  `json:"seq"`
+	Client    string `json:"client"`
+	Server    string `json:"server"`
+	Api       string `json:"api"`
+	Status    bool   `json:"status"`
+	Start     int64  `json:"start"`
+	End       int64  `json:"end"`
 }
 
 type TraceItem struct {
@@ -47,7 +57,7 @@ func LogDecode(data []byte) (LogItem, error) {
 	return li, err
 }
 
-func Convert(r RequestHeader, path, host string) TraceItem {
+func Convert(r RpcItem, path, host string) TraceItem {
 	status := 0
 	if !r.Status {
 		status = 1
@@ -66,9 +76,8 @@ func Convert(r RequestHeader, path, host string) TraceItem {
 	return ti
 }
 
-func RpcDecode(data []byte) (RequestHeader, error) {
-	ri := RequestHeader{}
-	dec := thrift.NewTDeserializer()
-	err := dec.Read(&ri, data)
+func RpcDecode(data []byte) (RpcItem, error) {
+	ri := RpcItem{}
+	err := json.Unmarshal(data, &ri)
 	return ri, err
 }
