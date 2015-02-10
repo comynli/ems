@@ -170,7 +170,10 @@ func (ss *StoreServer) send(conn endPoint, queue chan []byte, err chan error) {
 				}
 				err <- e
 			}
-			log.Printf(resp)
+			if resp == nil {
+				log.Printf("store to %s fail no responce", conn.Url.Host)
+				continue
+			}
 			if resp.StatusCode != 200 {
 				buf := []byte{}
 				for {
