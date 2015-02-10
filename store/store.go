@@ -170,6 +170,7 @@ func (ss *StoreServer) send(conn endPoint, queue chan []byte, err chan error) {
 				}
 				err <- e
 			}
+			log.Printf(resp)
 			if resp.StatusCode != 200 {
 				buf := []byte{}
 				for {
