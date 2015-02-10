@@ -71,6 +71,7 @@ func (fs *FrontendServer) listen() error {
 				length, err := conn.Read(b)
 				buf = append(buf, b[0:length]...)
 				if err != nil {
+					log.Panic(err)
 					log.Printf("read from %s fail: %s", conn.RemoteAddr().Network(), err)
 					return
 				}
@@ -101,6 +102,7 @@ func (fs *FrontendServer) listen() error {
 				length, err := conn.Read(b)
 				buf = append(buf, b[0:length]...)
 				if err != nil {
+					log.Panic(err)
 					log.Printf("read from %s fail: %s", conn.RemoteAddr().Network(), err)
 					return
 				}
