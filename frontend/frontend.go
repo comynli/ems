@@ -16,6 +16,11 @@ const (
 	BUF_SIZE = 1500
 )
 
+func isTimeout(err error) bool {
+	e, ok := err.(net.Error)
+	return ok && e.Timeout()
+}
+
 type FrontendServer struct {
 	logAddr  string
 	rpcAddr  string
@@ -70,9 +75,8 @@ func (fs *FrontendServer) listen() error {
 				conn.SetReadDeadline(time.Now().Add(time.Duration(3) * time.Second))
 				length, err := conn.Read(b)
 				buf = append(buf, b[0:length]...)
-				if err != nil {
-					log.Panic(err)
-					log.Printf("read from %s fail: %s", conn.RemoteAddr().Network(), err)
+				if err != nil && !isTimeout(err) {
+					log.Printf("read log item fail: %s", err)
 					return
 				}
 				if len(buf) > 0 {
@@ -101,9 +105,8 @@ func (fs *FrontendServer) listen() error {
 				conn.SetReadDeadline(time.Now().Add(time.Duration(3) * time.Second))
 				length, err := conn.Read(b)
 				buf = append(buf, b[0:length]...)
-				if err != nil {
-					log.Panic(err)
-					log.Printf("read from %s fail: %s", conn.RemoteAddr().Network(), err)
+				if err != nil && !isTimeout(err) {
+					log.Printf("read rpc item fail: %s", err)
 					return
 				}
 				if len(buf) > 0 {
