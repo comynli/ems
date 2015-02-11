@@ -65,7 +65,7 @@ func (ss *StoreServer) logEncode(li common.LogItem) ([]byte, error) {
 		return nil, err
 	}
 	for k, r := range rs {
-		t := common.Convert(r, li.Host, li.Path)
+		t := common.Convert(r, li.Path, li.Host)
 		buf, err := t.Encode()
 		if err != nil {
 			log.Printf("%s %s encode fail %s", t.RequestId, k, err)

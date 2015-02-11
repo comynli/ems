@@ -33,6 +33,7 @@ type TraceItem struct {
 	Seq       int32     `json:"seq"`
 	Client    string    `json:"client"`
 	Server    string    `json:"server"`
+	Api       string    `json:"api"`
 	Status    int       `json:"status"`
 	RT        int64     `json:"rt"`
 	TimeStamp time.Time `json:"timestamp"`
@@ -69,6 +70,7 @@ func Convert(r RpcItem, path, host string) TraceItem {
 		Path:      path,
 		Client:    r.Client,
 		Server:    r.Server,
+		Api:       r.Api,
 		Status:    status,
 		RT:        r.End - r.Start,
 		TimeStamp: time.Unix(r.Start/1000, 0),
