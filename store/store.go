@@ -85,7 +85,7 @@ func (ss *StoreServer) logEncode(li common.LogItem) ([]byte, error) {
 }
 
 func (ss *StoreServer) rpcEncode(ri common.RpcItem) {
-	key := strings.Join([]string{ri.Client, ri.Server, strconv.Itoa(int(ri.Seq))}, "#")
+	key := strings.Join([]string{ri.Client, ri.Server, ri.Api, strconv.Itoa(int(ri.Seq))}, "#")
 	t, err := ss.redisCluster.HGet(ri.RequestId, key)
 	if err != nil {
 		ss.redisCluster.HSet(ri.RequestId, key, ri)
@@ -172,7 +172,7 @@ func (ss *StoreServer) send(conn endPoint, queue chan []byte, err chan error) {
 			}
 			if resp == nil {
 				log.Printf("store to %s fail no responce", conn.Url.Host)
-				continue
+				return
 			}
 			if resp.StatusCode != 200 {
 				buf := []byte{}
